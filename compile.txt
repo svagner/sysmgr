@@ -1,0 +1,1 @@
+cc -ggdb -DDEBUG -DDEBUGMALLOC -Iinclude -lutil -lc -pthread -lpthread -L/usr/local/lib/  syscommands.c syshandler.c httphandler.c memcontrol.c logger.c conf.c netapi.c sysmgr.c httpparser.c -o sysmgr
