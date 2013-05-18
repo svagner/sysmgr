@@ -22,8 +22,10 @@
 typedef struct ErrCode {
 	int id;
 	char *value;
+	int stopper;
+	int timeout;
 } Errors;
-/* ErrorCode */
+/* ErrorCode --> defined in syshandler.c */
 extern Errors ErrCodes[];
 
 typedef struct HDDInfo {

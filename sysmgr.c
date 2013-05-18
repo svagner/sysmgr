@@ -45,8 +45,6 @@ sigcatch(int sig)
 		break;
 	case SIGINT: 
 		NOTICE("Get signal SIGINT. Exiting..."); 
-		pthread_exit(&thread[0]);
-		pthread_exit(&thread[1]);
 		xfree_all();
 		exit(0);
 		break;

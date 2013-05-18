@@ -21,9 +21,9 @@
 #define ETX 03
 
 Errors ErrCodes[] = {
-	{ 0, "Complate", }, 
-	{ 1, "Authorized failed", },
-	{ 2, "Data not valid", },
+	{ 0, "Complete", 0, 0 }, 
+	{ 1, "Authorized failed", 0, 0},
+	{ 2, "Data not valid", 0, 0},
 };
 
 static struct kevent *ke_vec = NULL;
@@ -31,6 +31,7 @@ static unsigned ke_vec_alloc = 0;
 static unsigned ke_vec_used = 0;
 static char const protoname[] = "tcp";
 static int client_end =0;
+char *encbuf = NULL;
 
 static void
 ke_change (int const ident,
@@ -116,60 +117,92 @@ do_write (struct kevent const *const kep)
 static void
 do_read (struct kevent const *const kep)
 {
-  enum { bufsize = 10024 };
-  auto char buf[bufsize];
-  auto char encbuf[bufsize];
+//  enum { bufsize = 3604 };
+//  auto char buf[bufsize];
+//  auto char encbuf[bufsize];
+
   int n;
   int ret;
+  unsigned int packet_size = 0;
   ecb *const ecbp = (ecb *) kep->udata;
 
-  bzero(buf, bufsize);
-  bzero(encbuf, bufsize);
   DPRINT_ARGS ("client %s", inet_ntoa(ecbp->client->ip));
 
-  if ((n = read (kep->ident, buf, bufsize)) == -1)
-    {
-      DPRINT_ARGS("Error reading socket: %s", strerror (errno));
-      close (kep->ident);
-      xfree (ecbp->client);
-      xfree (kep->udata);
-    }
-  else if (n == 0)
-    {
-      DPRINT_ARGS ("EOF reading socket for client %s", inet_ntoa(ecbp->client->ip));
-      close (kep->ident);
-      xfree (ecbp->client);
-      xfree (kep->udata);
-      client_end = 1;
-    }
-
-  DPRINT_ARGS("GET %d bytes", n);
-  encrypt_decrypt(encbuf, buf, n);
-
-  parse_incomming(encbuf, ecbp->client->ip, n, &ecbp->client->reqcount, kep);
-/*  if(ret>0)
+  if (!ecbp->bctrl->gotsize)
   {
-	  DPRINT_ARGS("Result parse: %d", ret);
-	  ecbp->buf = (char *) xmalloc (ret, "sys_in_ret");
-	  ecbp->bufsiz = ret;
-	  //memcpy (ecbp->buf, tempbuf, ret);
+	n = read (kep->ident, &packet_size, sizeof(unsigned int));
+	if (packet_size>10000)
+		return;
+	if (n == -1)	  
+	{
+	    DPRINT_ARGS("Error reading socket: %s", strerror (errno));
+	    close (kep->ident);
+	    xfree (ecbp->client);
+	    xfree (kep->udata);
+	}
+	else if (n == 0)
+	{
+	    DPRINT_ARGS ("EOF reading socket for client %s", inet_ntoa(ecbp->client->ip));
+	    close (kep->ident);
+	    xfree (ecbp->client);
+	    xfree (kep->udata);
+	    client_end = 1;
+	}
+	DPRINT_ARGS("Get %d header. Reallocated to %d", n, packet_size);
+
+	DPRINT_ARGS("Realloc %d to %d", sizeof(*ecbp->bctrl->buffer), packet_size);
+	ecbp->bctrl->buffer = malloc(packet_size);
+	encbuf = malloc(packet_size);
+	bzero(encbuf, packet_size);
+	ecbp->bctrl->gotsize=packet_size;
+	ke_change (kep->ident, EVFILT_READ, EV_ENABLE, kep->udata);
+	ke_change (kep->ident, EVFILT_WRITE, EV_DISABLE, kep->udata);
   }
-  else if (ret == 0)
+  else
   {
-	  ecbp->buf = (char *) xmalloc (n, "sys_buf_size");
-	  ecbp->bufsiz = n;
-	  memcpy (ecbp->buf, buf, n);
-  }
-  else if (ret == -1)
-  {
-      close (kep->ident);
-      xfree (ecbp->client);
-      xfree (kep->udata);
-      client_end = 1;
-  };*/
+	n = read (kep->ident, ecbp->bctrl->buffer+ecbp->bctrl->size, ecbp->bctrl->gotsize);
+	if (n == -1)	  
+	{
+	    DPRINT_ARGS("Error reading socket: %s", strerror (errno));
+	    close (kep->ident);
+	    xfree (ecbp->client);
+	    //xfree (kep->udata);
+	}
+	else if (n == 0)
+	{
+	    DPRINT_ARGS ("EOF reading socket for client %s", inet_ntoa(ecbp->client->ip));
+	    close (kep->ident);
+	    xfree (ecbp->client);
+	    //xfree (kep->udata);
+	    client_end = 1;
+	}
+    
+	ecbp->bctrl->size += n;
 
-  ke_change (kep->ident, EVFILT_READ, EV_DISABLE, kep->udata);
-  ke_change (kep->ident, EVFILT_WRITE, EV_ENABLE, kep->udata);
+	DPRINT_ARGS("GET %d bytes, transfer %d, got %d", n, ecbp->bctrl->size, ecbp->bctrl->gotsize-4);
+	if (ecbp->bctrl->size >= ecbp->bctrl->gotsize-4)
+	{
+	    encrypt_decrypt(encbuf, ecbp->bctrl->buffer, ecbp->bctrl->size);
+
+	    parse_incomming(encbuf, ecbp->client->ip, n, &ecbp->client->reqcount, kep);
+	    ecbp->bctrl->size = 0;
+	    ecbp->bctrl->gotsize = 0;
+
+	    //bzero(ecbp->bctrl->buffer, ecbp->bctrl->gotsize);
+	    //free(ecbp->bctrl->buffer);
+	    //ecbp->bctrl->buffer = xmalloc(sizeof(unsigned long int), "sys_readbuf");
+	    bzero(ecbp->bctrl->buffer, sizeof(unsigned long int));
+	    free(encbuf);
+	    free(ecbp->bctrl->buffer);
+	    ke_change (kep->ident, EVFILT_READ, EV_DISABLE, kep->udata);
+	    ke_change (kep->ident, EVFILT_WRITE, EV_ENABLE, kep->udata);
+	}
+	else
+	{
+	    ke_change (kep->ident, EVFILT_READ, EV_ENABLE, kep->udata);
+	    ke_change (kep->ident, EVFILT_WRITE, EV_DISABLE, kep->udata);
+	}
+  }
 }
 
 static void
@@ -180,6 +213,7 @@ do_accept (struct kevent const *const kep)
   int s, n;
   ecb *ecbp;
   client_info *cinfo;
+  bufcontrol *bctrl;
 
   sinsiz = sizeof(sockaddr_in);
   if ((s = accept (kep->ident, (struct sockaddr *)&sin, &sinsiz)) == -1)
@@ -188,13 +222,19 @@ do_accept (struct kevent const *const kep)
 
   ecbp = (ecb *) xmalloc (sizeof (ecb), "sys_ecb");
   cinfo = (client_info *) xmalloc (sizeof (client_info), "sys_clientinfo");
+  bctrl = (bufcontrol *) xmalloc (sizeof (bufcontrol), "sys_buffercontrol");
   cinfo->ip = sin.sin_addr;
   cinfo->reqcount = 0;
   ecbp->client = cinfo;
+  ecbp->bctrl = bctrl;
+//  ecbp->bctrl->buffer = xmalloc(sizeof(unsigned long int), "sys_readbuf");
+//  bzero(ecbp->bctrl->buffer, sizeof(unsigned long int));
+  ecbp->bctrl->size = 0;
+  ecbp->bctrl->gotsize = 0;
   ecbp->do_read = do_read;
   ecbp->do_write = do_write;
 //  ecbp->buf = NULL;
-//  ecbp->bufsiz = 0;
+  ecbp->error = 0;
 
   ke_change (s, EVFILT_WRITE, EV_ADD | EV_ENABLE, ecbp);
   ke_change (s, EVFILT_READ, EV_ADD | EV_DISABLE, ecbp);
@@ -228,11 +268,11 @@ event_loop (int const kq)
 	  {
 		  ERROR_ARGS("EV_ERROR: %s\n", strerror(kep->data));
 		  close(kep->ident);
-		  continue;
+		  break;
 	  };
 	  if (kep->flags & EV_DELETE)
 	  {
-		  close(kep->ident);
+	//	  close(kep->ident);
 		  continue;
 	  };
 	  if (ecbp->do_read==0)
@@ -254,7 +294,7 @@ start_syshandle(void *arg)
   auto int one = 1;
   int portno = 0;
   int option_errors = 0;
-  int server_sock;
+  int server_sock  = 0;
   auto sockaddr_in sin;
   servent *servp;
   auto ecb listen_ecb;
@@ -268,7 +308,7 @@ start_syshandle(void *arg)
     FATAL_ARGS("Error creating socket: %s", strerror (errno));
 
 
-  if (setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one) == -1)
+  if (setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) == -1)
     FATAL_ARGS("Error setting SO_REUSEADDR for socket: %s", strerror (errno));
 
   memset (&sin, 0, sizeof sin);

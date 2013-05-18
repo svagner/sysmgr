@@ -21,6 +21,13 @@ typedef struct {
     int  code;
 } http_request;
 
+typedef struct {
+    void *buffer;	
+    void *offset;
+    long long size;
+    unsigned int gotsize;
+} bufcontrol;
+
 /* Control event struct for system thread */
 typedef struct {
     action	*do_read;
@@ -30,6 +37,7 @@ typedef struct {
     client_info *client;
     char	*arg;
     int		error;
+    bufcontrol  *bctrl;
 } ecb;
 
 /* Control event struct for http thread */
@@ -37,7 +45,7 @@ typedef struct {
     action	*do_http_read;
     action	*do_http_write;
     char	*buf;
-    unsigned	bufsiz;
+    unsigned int bufsiz;
     client_info *client;
     http_request *req;
     int		end_connection;

@@ -23,11 +23,11 @@
 #include "include/sysproto.h"
 
 int
-parse_http_request(struct kevent const *const kephttp, char *buf)
+parse_http_request(struct kevent *kephttp, char *buf)
 {
     if (strlen(buf)<1)
 	    return -1;
-    ecbhttp *const ecbp = (ecbhttp *) kephttp->udata;
+    ecbhttp *ecbp = (ecbhttp *) kephttp->udata;
     const char *sep = "\n";	
     char * pch;
     char test[100];
@@ -53,9 +53,9 @@ parse_http_request(struct kevent const *const kephttp, char *buf)
 };
 
 int
-get_response(char *bufout, struct kevent const *const kephttp, int page_is_read)
+get_response(char *bufout, struct kevent *kephttp, int page_is_read)
 {
-    ecbhttp *const ecbp = (ecbhttp *) kephttp->udata;
+    ecbhttp *ecbp = (ecbhttp *) kephttp->udata;
     struct adminAccess *adminAccess_entry;
     struct _ServersCtl *ServersCtl_entry;
 
@@ -84,7 +84,7 @@ get_response(char *bufout, struct kevent const *const kephttp, int page_is_read)
 		/* malloc memory for buffer */    
 		if (cnt==0)
 		{
-		    sizeOfOut = 20+strlen(inet_ntoa(adminAccess_entry->ip))+strlen(adminAccess_entry->login);
+		    sizeOfOut = 21+strlen(inet_ntoa(adminAccess_entry->ip))+strlen(adminAccess_entry->login);
 		    buffer = xmalloc(sizeOfOut, "http_parce_buf");    
 		    bzero(buffer, sizeOfOut);
 		    DPRINT_ARGS("ALLOCATED %d", sizeOfOut);
@@ -92,7 +92,7 @@ get_response(char *bufout, struct kevent const *const kephttp, int page_is_read)
 		else
 		{
 		    DPRINT_ARGS("[%d:%d] Realloc from %d to %d", cnt, kephttp->ident, strlen(buffer), 20+strlen(inet_ntoa(adminAccess_entry->ip))+strlen(adminAccess_entry->login));	
-		    buffer = xrealloc(buffer, strlen(buffer) + strlen(inet_ntoa(adminAccess_entry->ip))+strlen(adminAccess_entry->login)+20);	
+		    buffer = xrealloc(buffer, strlen(buffer) + strlen(inet_ntoa(adminAccess_entry->ip))+strlen(adminAccess_entry->login)+21);	
 		    DPRINT_ARGS("%s", adminAccess_entry->login);
 		};
 		strcat(buffer, "{ip: '");
@@ -119,6 +119,7 @@ get_response(char *bufout, struct kevent const *const kephttp, int page_is_read)
 	    xfree(buffer);
 	    return 200;
     }
+    /* List all Servers */
     else if (!strcmp("/servers", ecbp->req->path) || !strcmp("/servers/", ecbp->req->path))
     {
 	    LIST_FOREACH(ServersCtl_entry, &ServersCtl, ServersCtl_list)
@@ -129,71 +130,85 @@ get_response(char *bufout, struct kevent const *const kephttp, int page_is_read)
 			sizeOfHDD=sizeOfHDD+strlen(ServersCtl_entry->serverInf->HardDrives[hddcnt]->vendor)+strlen(ServersCtl_entry->serverInf->HardDrives[hddcnt]->product)+strlen(ServersCtl_entry->serverInf->HardDrives[hddcnt]->revision)+strlen(ServersCtl_entry->serverInf->HardDrives[hddcnt]->device);
 		}
 		//81 is work without HDD
-		sizeOfSInfo = 91+26+ServersCtl_entry->serverInf->numCPU*4+strlen(inet_ntoa(ServersCtl_entry->ip))+strlen(ServersCtl_entry->serverInf->serverName)+strlen(ServersCtl_entry->serverInf->CPU[0])+strlen(ServersCtl_entry->serverInf->Board)+strlen(memory)+strlen(ServersCtl_entry->serverInf->OS)+strlen(ServersCtl_entry->serverInf->ReleaseOS+sizeOfHDD);    
+		sprintf(memory, "%ldMb", ServersCtl_entry->serverInf->memory/1024/1024);	
+		sizeOfSInfo = 91+26+400+ServersCtl_entry->serverInf->numCPU*4+strlen(inet_ntoa(ServersCtl_entry->ip))+strlen(ServersCtl_entry->serverInf->serverName)+strlen(ServersCtl_entry->serverInf->CPU[0])+strlen(ServersCtl_entry->serverInf->Board)+strlen(memory)+strlen(ServersCtl_entry->serverInf->OS)+strlen(ServersCtl_entry->serverInf->ReleaseOS)+sizeOfHDD;    
 		DPRINT_ARGS("COUNT Servers: %d", cnt);    
 		/* malloc memory for buffer */    
 		if (cnt==0)
 		{
-		    sprintf(memory, "%ldMb", ServersCtl_entry->serverInf->memory/1024/1024);	
-		    buffer = xmalloc(sizeOfSInfo, "http_servers_buf");    
-		    bzero(buffer, sizeOfSInfo);
+		//    sprintf(memory, "%ldMb", ServersCtl_entry->serverInf->memory/1024/1024);	
+		    buffer = xmalloc(sizeOfSInfo+18, "http_servers_buf");    
+		    bzero(buffer, sizeOfSInfo+18);
 		    DPRINT_ARGS("ALLOCATED %d", sizeOfSInfo);
 		}
 		else
 		{
-		    buffer = xrealloc(buffer, strlen(buffer) + sizeOfSInfo);
+		    strcat(buffer, ", ");
+		    buffer = xrealloc(buffer, strlen(buffer) + sizeOfSInfo+18);
 		};
-		strcat(buffer, "{ip: '");
+		strcat(buffer, "{\"ip\": \"");
 		strcat(buffer, inet_ntoa(ServersCtl_entry->ip));
-		strcat(buffer, "', name: '");
+		strcat(buffer, "\", \"name\": \"");
 		strcat(buffer, ServersCtl_entry->serverInf->serverName);
-		strcat(buffer, "', CPU: { ");
+		strcat(buffer, "\", \"CPU\": [ ");
 		for (cpunum = 0; cpunum< ServersCtl_entry->serverInf->numCPU; cpunum++)
 		{
-		    strcat(buffer, "'");
+		    if (cpunum>0)	
+			strcat(buffer, ", ");
+		    strcat(buffer, "\"");
 		    strcat(buffer, ServersCtl_entry->serverInf->CPU[cpunum]);
-		    strcat(buffer, "', ");
+		    strcat(buffer, "\"");
 
 		}
-		strcat(buffer, "}, HDD: { ");
+		strcat(buffer, "], \"HDDS\": [ ");
 		for (hddcnt = 0; hddcnt < ServersCtl_entry->serverInf->numHDD; hddcnt++)
 		{
-	/*	    char nHDD[MAXHHDS];
-		    memset(nHDD, 0, MAXHHDS);
-		    sprintf(nHDD, "%d", hddcnt);*/
-		    strcat(buffer, "HDD: { ");	
-		    strcat(buffer, "'");
-		    strcat(buffer, ServersCtl_entry->serverInf->HardDrives[hddcnt]->vendor);
-		    strcat(buffer, "', ");
-		    strcat(buffer, "'");
+		    if (hddcnt)
+			strcat(buffer, ",");
+		    strcat(buffer, " \"");
 		    strcat(buffer, ServersCtl_entry->serverInf->HardDrives[hddcnt]->product);
-		    strcat(buffer, "', ");
-		    strcat(buffer, "'");
-		    strcat(buffer, ServersCtl_entry->serverInf->HardDrives[hddcnt]->revision);
-		    strcat(buffer, "', ");
-		    strcat(buffer, "'");
-		    strcat(buffer, ServersCtl_entry->serverInf->HardDrives[hddcnt]->device);
-		    strcat(buffer, "', ");
-		    strcat(buffer, "}, ");	
+		    strcat(buffer, "\" ");
 
 		};
+		strcat(buffer, "], ");
 
-		strcat(buffer, "}, Mothreboard: '");
+		for (hddcnt = 0; hddcnt < ServersCtl_entry->serverInf->numHDD; hddcnt++)
+		{
+		    strcat(buffer, "\"");	
+		    strcat(buffer, ServersCtl_entry->serverInf->HardDrives[hddcnt]->product);
+		    strcat(buffer, "\": { ");	
+		    strcat(buffer, "\"vendor\": \"");	
+		    strcat(buffer, ServersCtl_entry->serverInf->HardDrives[hddcnt]->vendor);
+		    strcat(buffer, "\", \"product\": \"");
+		    strcat(buffer, ServersCtl_entry->serverInf->HardDrives[hddcnt]->product);
+		    strcat(buffer, "\", \"revision\": \"");
+		    strcat(buffer, ServersCtl_entry->serverInf->HardDrives[hddcnt]->revision);
+		    strcat(buffer, "\", \"device\": \"");
+		    strcat(buffer, ServersCtl_entry->serverInf->HardDrives[hddcnt]->device);
+		    strcat(buffer, "\" }, ");
+		};
+
+		strcat(buffer, "\"Mothreboard\": \"");
 		strcat(buffer, ServersCtl_entry->serverInf->Board);
-		strcat(buffer, "', Memory: '");
+		strcat(buffer, "\", \"Memory\": \"");
 		strcat(buffer, memory);
 
-		strcat(buffer, "', OS: '");
+		strcat(buffer, "\", \"OS\": \"");
 		strcat(buffer, ServersCtl_entry->serverInf->OS);
-		strcat(buffer, "', ReleaseOS: '");
+		strcat(buffer, "\", \"ReleaseOS\": \"");
 		strcat(buffer, ServersCtl_entry->serverInf->ReleaseOS);
 
-		strcat(buffer, "'},");
+		strcat(buffer, "\"} ");
 		cnt++;
 	    };
 	    DPRINT_ARGS("BUFFER: %s", buffer);
 	    if (!cnt)
-		    return 0;
+	    {
+		sprintf(bufout, "%s%zd\n\n%s", HEAD404, strlen(page404)+1, page404);
+		NOTICE_ARGS("%s GET %s CODE 404", inet_ntoa(ecbp->client->ip), ecbp->req->path);
+		xfree(buffer);
+		return 404;
+	    };
 	    cnt=0;
 //	    sizeOfOut = strlen(pageAdmin)-strlen("$buffer$")+strlen(buffer)+100;
 //	    char outbuf[sizeOfOut];
@@ -204,6 +219,107 @@ get_response(char *bufout, struct kevent const *const kephttp, int page_is_read)
 	    NOTICE_ARGS("%s GET %s CODE 200", inet_ntoa(ecbp->client->ip), ecbp->req->path);
 	    xfree(buffer);
 	    return 200;
+    }
+    else if (!strncmp("/servers/?", ecbp->req->path, 10) || !strncmp("/servers?", ecbp->req->path, 9))
+    {
+	const char *sep = "?";	
+	char options[50];
+	int result;
+
+	result=sscanf(ecbp->req->path, "/servers?%s", options);
+	if (result!=1)
+		result=sscanf(ecbp->req->path, "/servers/?%s", options);
+	if (result!=1)
+	{
+		sprintf(bufout, "%s%zd\n\n111%s", HEAD404, strlen(page404)+1, page404);
+		NOTICE_ARGS("%s GET %s CODE 404", inet_ntoa(ecbp->client->ip), ecbp->req->path);
+		return 404;
+	}
+	LIST_FOREACH(ServersCtl_entry, &ServersCtl, ServersCtl_list)
+	{
+	    if (!strcmp(ServersCtl_entry->serverInf->serverName, options))
+	    {
+		if (cnt==0)
+		{
+		    sprintf(memory, "%ldMb", ServersCtl_entry->serverInf->memory/1024/1024);	
+		    buffer = xmalloc(5000, "http_servers_buf");    
+		    bzero(buffer, 5000);
+		    DPRINT_ARGS("ALLOCATED %d", sizeOfSInfo);
+		}
+		else
+		    strcat(buffer, ", ");
+		strcat(buffer, "{\"ip\": \"");
+		strcat(buffer, inet_ntoa(ServersCtl_entry->ip));
+		strcat(buffer, "\", \"name\": \"");
+		strcat(buffer, ServersCtl_entry->serverInf->serverName);
+		strcat(buffer, "\", \"CPU\": [ ");
+		for (cpunum = 0; cpunum< ServersCtl_entry->serverInf->numCPU; cpunum++)
+		{
+		    if (cpunum>0)	
+		    strcat(buffer, ", ");
+		    strcat(buffer, "\"");
+		    strcat(buffer, ServersCtl_entry->serverInf->CPU[cpunum]);
+		    strcat(buffer, "\"");
+
+		}
+		strcat(buffer, "], \"HDDS\": [ ");
+		for (hddcnt = 0; hddcnt < ServersCtl_entry->serverInf->numHDD; hddcnt++)
+		{
+		    if (hddcnt)
+			strcat(buffer, ",");
+		    strcat(buffer, " \"");
+		    strcat(buffer, ServersCtl_entry->serverInf->HardDrives[hddcnt]->product);
+		    strcat(buffer, "\" ");
+
+		};
+		strcat(buffer, "], ");
+
+		for (hddcnt = 0; hddcnt < ServersCtl_entry->serverInf->numHDD; hddcnt++)
+		{
+		    strcat(buffer, "\"");	
+		    strcat(buffer, ServersCtl_entry->serverInf->HardDrives[hddcnt]->product);
+		    strcat(buffer, "\": { ");	
+		    strcat(buffer, "\"vendor\": \"");	
+		    strcat(buffer, ServersCtl_entry->serverInf->HardDrives[hddcnt]->vendor);
+		    strcat(buffer, "\", \"product\": \"");
+		    strcat(buffer, ServersCtl_entry->serverInf->HardDrives[hddcnt]->product);
+		    strcat(buffer, "\", \"revision\": \"");
+		    strcat(buffer, ServersCtl_entry->serverInf->HardDrives[hddcnt]->revision);
+		    strcat(buffer, "\", \"device\": \"");
+		    strcat(buffer, ServersCtl_entry->serverInf->HardDrives[hddcnt]->device);
+		    strcat(buffer, "\" }, ");
+		};
+
+		strcat(buffer, "\"Mothreboard\": \"");
+		strcat(buffer, ServersCtl_entry->serverInf->Board);
+		strcat(buffer, "\", \"Memory\": \"");
+		strcat(buffer, memory);
+
+		strcat(buffer, "\", \"OS\": \"");
+		strcat(buffer, ServersCtl_entry->serverInf->OS);
+		strcat(buffer, "\", \"ReleaseOS\": \"");
+		strcat(buffer, ServersCtl_entry->serverInf->ReleaseOS);
+
+		strcat(buffer, "\"} ");
+		cnt++;
+		break;
+	    };
+	};
+	    DPRINT_ARGS("BUFFER: %s", buffer);
+	    if (!cnt)
+	    {
+		xfree(buffer);
+		sprintf(bufout, "%s%zd\n\n%s", HEAD404, strlen(page404), page404);
+		NOTICE_ARGS("%s GET %s CODE 404", inet_ntoa(ecbp->client->ip), ecbp->req->path);
+
+		return 404;
+	    };
+	    cnt=0;
+	    sprintf(bufout, "%s%zd\n\n%s", HEAD200, strlen(buffer), buffer);
+	    NOTICE_ARGS("%s GET %s CODE 200", inet_ntoa(ecbp->client->ip), ecbp->req->path);
+	    xfree(buffer);
+	    return 200;
+
     }
     else
     {

@@ -69,10 +69,9 @@ ke_change (int const ident,
 static void
 do_http_write (struct kevent *kephttp)
 {
-	DPRINT("START WRITE");
   int n, code, retcode, offset, size;
-  ecbhttp *const ecbp = (ecbhttp *) kephttp->udata;
-  char buffer[50000];
+  ecbhttp *ecbp = (ecbhttp *) kephttp->udata;
+  char buffer[20000];
   FILE * fd = NULL;
   char *staticfile, *asize;
   size_t staticsize;
@@ -81,14 +80,13 @@ do_http_write (struct kevent *kephttp)
 
 //  buffer = xmalloc(50000, "buf1");
 
-  bzero(buffer, 50000);
+  bzero(buffer, 20000);
   if (!configVar[9].isset && atoi(configVar[9].value) == 0)
     if (init_pages())
 	FATAL("Init pages failed");  
 
   DPRINT_ARGS("KEP_HTTP->UDATA->REQ: %p", ecbp->req);
 	  
-  DPRINT("WRITE STEP 1");
   if(kephttp!=0)
     retcode = get_response(buffer, kephttp, reading_pages);
   else
@@ -97,7 +95,6 @@ do_http_write (struct kevent *kephttp)
   {
 	case 200:
 		n = write(kephttp->ident, buffer, strlen(buffer));
-//		xfree(buffer);
 		break;
 	case 202:
 		if ((fd = fopen(buffer, "r"))==NULL)
@@ -106,7 +103,6 @@ do_http_write (struct kevent *kephttp)
 		    bzero(buffer, strlen(buffer));
 		    sprintf(buffer, "%s%zd\n\n%s", HEAD404, strlen(page404), page404);
 		    n = write(kephttp->ident, buffer, strlen(buffer));
-//		    xfree(buffer);
 		    if (n == -1)
 		    {
 			ERROR_ARGS("Error writing socket: %s", strerror (errno));
@@ -128,7 +124,6 @@ do_http_write (struct kevent *kephttp)
 		n = write(kephttp->ident, asize, strlen(asize));
 		xfree(asize);
 		xfree(staticfile);
-//		xfree(buffer);
 		if (n == -1)
 		{
 		    //ERROR_ARGS("Error writing socket: %s", strerror (errno));
@@ -141,7 +136,6 @@ do_http_write (struct kevent *kephttp)
 		break;
 	case 404:
 		n = write(kephttp->ident, buffer, strlen(buffer));
-//		xfree(buffer);
 		if (n == -1)
 		{
 		    ERROR_ARGS("Error writing socket: %s", strerror (errno));
@@ -153,7 +147,6 @@ do_http_write (struct kevent *kephttp)
 ///		xfree(buffer);
 		break;
   };
-  DPRINT("WRITE STEP 2");
   DPRINT_ARGS("REQUEST: %s", ecbp->req);
   //xfree (ecbp->buf);  /* Free this buffer, no matter what.  */
   if (reading_pages)
@@ -162,7 +155,7 @@ do_http_write (struct kevent *kephttp)
   if (ecbp->req->path)
   {
     DPRINT("FREE REQ;");	  
-    xfree(ecbp->req);
+    //xfree(ecbp->req);
  }
 
   ke_change (kephttp->ident, EVFILT_WRITE, EV_DISABLE, kephttp->udata);
@@ -175,7 +168,7 @@ do_http_read (struct kevent *kephttp)
   enum { bufsize = 512 };
   auto char buf[bufsize];
   int n, result;
-  ecbhttp *const ecbp = (ecbhttp *) kephttp->udata;
+  ecbhttp *ecbp = (ecbhttp *) kephttp->udata;
   memset(buf, 0, bufsize);
 
   if ((n = read (kephttp->ident, buf, bufsize)) == -1)
@@ -291,7 +284,7 @@ event_loop (int const kq)
 			kephttp = &ke_vec[i];
 
 
-			ecbhttp const *const ecbp = (ecbhttp *) kephttp->udata;
+			ecbhttp *ecbp = (ecbhttp *) kephttp->udata;
 
 			//ecbp->do_http_read = do_http_read;
 			//ecbp->do_http_write = do_http_write;
@@ -314,13 +307,23 @@ event_loop (int const kq)
 		    if (kephttp->flags & EV_ERROR || kephttp->flags & EV_EOF)
 			    {
 				ERROR_ARGS("EV_ERROR: %s\n", strerror(kephttp->data));
+				free(ecbp->client);
+				ecbp->client=NULL;
+				free(ecbp->req);
+				ecbp->req = NULL;
+				free(ecbp->buf);
+				ecbp->buf = NULL;
+			//	if (kephttp->ident)
 				close(kephttp->ident);
-				continue;
+				//free(ecbp);
+				//ecbp = NULL;
+
+				break;
 			    };
 			    if (kephttp->flags & EV_DELETE)
 			    {
-				ERROR("EV_DELETE!!!");
-				close(kephttp->ident);
+				//close(kephttp->ident);
+				//free(ecbp->client);
 				continue;
 			    };
 			    if (ecbp->do_http_read==0)
@@ -342,11 +345,12 @@ start_httphandle(void *arg)
   auto int one = 1;
   int portno = 0;
   int option_errors = 0;
-  int server_sock;
+  int server_sock = 0;
   auto sockaddr_in sin;
   servent *servp;
   auto ecbhttp listen_ecb;
   int kq;
+  int tmout = 10;
 
   if (configVar[9].isset && atoi(configVar[9].value) == 1)
   {
@@ -361,7 +365,7 @@ start_httphandle(void *arg)
   if ((server_sock = socket (PF_INET, SOCK_STREAM, 0)) == -1)
     FATAL_ARGS("Error creating socket: %s", strerror (errno));
 
-  if (setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one) == -1)
+  if (setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) == -1)
     FATAL_ARGS("Error setting SO_REUSEADDR for socket: %s", strerror (errno));
 
   memset(&sin, 0, sizeof(sockaddr_in));
@@ -401,7 +405,7 @@ init_pages(void)
 	char path[MAXPATHLEN];
 
 	/* init page 404 */
-	bzero(path, strlen(path));
+	bzero(path, MAXPATHLEN);
 	strcpy(path, configVar[8].value);
 	page = strcat(path, PAGE404);
 
@@ -412,7 +416,7 @@ init_pages(void)
 	size = ftell(fd);
 	fseek(fd, 0, SEEK_SET);
 
-	page404 = xmalloc(size, "page404");
+	page404 = xmalloc(size+1, "page404");
 	fread(page404, 1, size, fd);
 
 	fclose(fd);
@@ -450,7 +454,7 @@ client_free(struct kevent * kephttp)
     ecbhttp *ecbp = (ecbhttp *) kephttp->udata;
     struct adminAccess *adminAccess_entry;
     int found=0;
-/*
+
     LIST_FOREACH(adminAccess_entry, &adminAccessCtl, adminAccess_list)
     {
 	if (adminAccess_entry->ident == kephttp->ident)
@@ -461,15 +465,15 @@ client_free(struct kevent * kephttp)
 	    DPRINT_ARGS("REMOVE client %s from list", inet_ntoa(adminAccess_entry->ip));   
 	    break;
 	};
-      };*/
+      };
       //xfree(ecbp->req);
 
 
  //     if(kevent(kq, kephttp, 1,0,0,NULL) < 0) perror("kevent()");
     //  close(kephttp->ident);
-      xfree (ecbp->client);
-      xfree(ecbp->req);
-      xfree (kephttp->udata);
+      //xfree (ecbp->client);
+      //xfree(ecbp->req);
+      //xfree (kephttp->udata);
       client_end=1;
 //  ke_change (kephttp->ident, EVFILT_READ, EV_DELETE, kephttp->udata);
 //  ke_change (kephttp->ident, EVFILT_WRITE, EV_DELETE, kephttp->udata);
