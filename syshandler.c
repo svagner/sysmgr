@@ -73,15 +73,22 @@ do_write (struct kevent const *const kep)
   char *nstr = "\r\n";
   char *buffer;
 
+  sizeOfBuf = sizeof(int);
+  buffer = xmalloc(sizeOfBuf, "sys_outBuffer");
+  memcpy(buffer, &ErrCodes[ecbp->error].id, sizeof(int));
 
-  switch(ecbp->error)
+/*  switch(ecbp->error)
   {
-	  case 0: sizeOfBuf = strlen(ErrCodes[0].value)+sizeof(int);
+	  case 0: //sizeOfBuf = strlen(ErrCodes[0].value)+sizeof(int);
+		  //buffer = xmalloc(sizeOfBuf, "sys_outBuffer");
+		  sizeOfBuf = sizeof(int);
 		  buffer = xmalloc(sizeOfBuf, "sys_outBuffer");
 		  memcpy(buffer, &ErrCodes[0].id, sizeof(int));
-		  memcpy(buffer+sizeof(int), ErrCodes[0].value, strlen(ErrCodes[0].value));
+		  //memcpy(buffer+sizeof(int), ErrCodes[0].value, strlen(ErrCodes[0].value));
 		  break;
-	  case 1: sizeOfBuf = strlen(ErrCodes[1].value)+sizeof(int);
+	  case 1: //sizeOfBuf = strlen(ErrCodes[1].value)+sizeof(int);
+		  //buffer = xmalloc(sizeOfBuf, "sys_outBuffer");
+		  sizeOfBuf = sizeof(int);
 		  buffer = xmalloc(sizeOfBuf, "sys_outBuffer");
 		  memcpy(buffer, &ErrCodes[1].id, sizeof(int));
 		  memcpy(buffer+sizeof(int), ErrCodes[1].value, strlen(ErrCodes[1].value));
@@ -93,7 +100,7 @@ do_write (struct kevent const *const kep)
 		  break;
 	  default:
 		  break;
-  };
+  };*/
 //  n = write (kep->ident, ecbp->buf, ecbp->bufsiz);
   n = write (kep->ident, buffer, sizeOfBuf);
   xfree(buffer);

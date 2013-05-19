@@ -36,7 +36,7 @@ ke_change (int const ident,
 	   int const flags,
 	   void *const udata)
 {
-  enum { initial_alloc = 100500 };
+  enum { initial_alloc = 1000 };
   struct kevent *kephttp;
 
   if (!ke_vec_alloc)
@@ -306,7 +306,10 @@ event_loop (int const kq)
 
 		    if (kephttp->flags & EV_ERROR || kephttp->flags & EV_EOF)
 			    {
-				ERROR_ARGS("EV_ERROR: %s\n", strerror(kephttp->data));
+				if ((kephttp->data))    
+				    ERROR_ARGS("EV_ERROR: %d:%s\n", strerror(kephttp->data));
+				else
+				    NOTICE_ARGS("Client %s closed connection", inet_ntoa(ecbp->client->ip));
 				free(ecbp->client);
 				ecbp->client=NULL;
 				free(ecbp->req);
@@ -315,8 +318,8 @@ event_loop (int const kq)
 				ecbp->buf = NULL;
 			//	if (kephttp->ident)
 				close(kephttp->ident);
-				//free(ecbp);
-				//ecbp = NULL;
+				free(ecbp);
+				ecbp = NULL;
 
 				break;
 			    };
